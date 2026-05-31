@@ -119,15 +119,18 @@ Check 8    Real-size vs micro-test pro-rata                  (sniper._guardRealB
   | `NUMBER` (Day 9) | +15 | `block.number` time-gating signal |
   | `TIMESTAMP` (Day 9) | +15 | `block.timestamp` time-gating signal |
   | `GRACE_PATTERN` (Day 9) | +40 | SLOAD followed by NUMBER/TIMESTAMP within 16 ops — v7/v16 launchBlock + grace fingerprint |
+  | `EVM_GLOBAL_BEFORESWAP_ONLY` (Day 10) | +50 | Any EVM-global opcode (GAS/COINBASE/ORIGIN/BASEFEE/BLOCKHASH/GASLIMIT) combined with only-beforeSwap permission — closes solo-EVM-global bypasses (vectors #2/#3/#6/#9) |
 
   Detection writes the hook into `hook_blacklist` with reason `bytecode_heuristic` so subsequent encounters short-circuit at Check 3.4.
 
-**Check 3.6 — Delayed-tax probe (FIX 34, multi-horizon since Day 9).** Calls V4 Quoter twice for each swap direction:
+**Check 3.6 — Delayed-tax probe (FIX 34, multi-horizon since Day 9, hookless-aware since Day 10).** Calls V4 Quoter twice for each swap direction:
 
   - `latest` block — establishes baseline `currentOut`
   - Each future horizon in `config.networks[net].delayTaxProbeHorizons` (sepolia/ethereum: `[50, 300, 1500]`; base: `[300, 1800, 9000]`) — uses `eth_call` with `BlockOverrides` `{number, time}` to simulate the same swap at that future block
 
   Returns the worst (highest) drop across all horizons. A drop above 5% on either swap direction marks the hook as a delayed-tax honeypot. Pre-Day-9 the probe used a single horizon (50 blocks on sepolia) and could be bypassed by any grace longer than that. The multi-horizon variant defeats any grace shorter than the largest horizon (~5 hours of wall clock on every chain).
+
+  **Day 10 extension — hookless V4 pools.** Pre-Day-10 the probe skipped pools with `hooks = 0x0` (no hook → assumed no delayed-tax risk). That missed token-side time-bombs: an ERC20 whose `transfer()` reverts or escalates fees after a stored expiry. Since Day 10, the probe runs for hookless V4 pools too. A future-block Quoter call traces through `token.transfer()` inside `PoolManager.swap` simulation, so token-side time-gating surfaces as a future-block revert (treated as `detected: true, dropPct: 100`) or a future-block quote drop. Hookless detections write only `analyzed_tokens` HONEYPOT (no hook to blacklist) with reason `token_time_bomb_detected`.
 
 **Check 3.7 — Layer B caller-spoof (Day 4).** Compares two Quoter quotes: one from the canonical Quoter address (Check 3.6 baseline), one from a synthetic Quoter that the bot constructs via `eth_simulateV1` with `stateOverrides[SPOOFED_ADDR].code = getCode(realQuoter)`. For clean hooks the quotes match. For caller-discriminating hooks (canonical v9 OR obfuscated v13 where the Quoter address sits in a storage slot instead of as PUSH20) the spoofed quote drops by ~99% and the trap is detected. Silently skipped if the RPC does not support `eth_simulateV1`.
 
@@ -154,6 +157,8 @@ Check 8    Real-size vs micro-test pro-rata                  (sniper._guardRealB
   - `MANUAL` / `AUTO_UNSTUCK` / `LP_DROP`: skip (user explicitly wants a forced exit, even at a loss)
 
 **Layer E2 sell-side gas re-check (Day 8, executor._sellV4).** Before submitting a real sell transaction, the executor's existing `provider.estimateGas` is interpreted. If it returns > 5,000,000 gas or throws with a gas-trap error pattern, the executor writes the token to `analyzed_tokens` as HONEYPOT (reason `gas_trap_at_sell`, layer E2), sends a Telegram alert, and throws an error with the prefix `GAS_TRAP_AT_SELL`. `scripts/auto_unstuck.js` recognizes that marker and writes off the position on the first attempt instead of looping through 3 retries.
+
+**Sell-side definitive-revert detector (Day 10 Fix 3, executor._sellV4).** Same idea as Layer E2 but for *clean* reverts (not gas-trap reverts). When `provider.estimateGas` returns a definitive revert that isn't a gas-trap pattern (token's `transfer()` reverts cleanly for the bot wallet, hook unconditionally rejects), the executor persists HONEYPOT to `analyzed_tokens` (reason `sell_definitive_revert`), sends a Telegram alert, and throws with the prefix `SELL_DEFINITIVE_REVERT`. Auto-unstuck recognises that marker and writes off the position on first attempt. Catches token-blacklist-post-buy attacks (an ERC20 that adds the bot wallet to an internal blacklist on first receive — micro-test sells pass, real sell fails). Micro-test sells skip this path to avoid false positives on tiny amounts.
 
 **Layer F LP-drop monitor (Day 8, positionManager.checkAllPositions).** Every 30 s the position manager calls `PoolManager.getLiquidity(poolId)` for each open V4 position and compares to the buy-time baseline stored in `trades.initial_liquidity`. If current liquidity drops below `(initial × lpDropThresholdPercent / 100)` (default 30%), the manager flags `_lpDropFired = true` (one-shot), fires an emergency sell with reason `LP_DROP`, and sends a Telegram alert via `notifier.sendLpDropAlert`. Catches deployer LP rug-pulls within the 30 s tick window. Skipped for V3 positions and for any row without a baseline.
 
@@ -544,6 +549,17 @@ cd /home/slavy/projects/gemba-sniper-dashboard && \
 ```
 
 ---
+
+## Attack coverage matrix
+
+Per-vector coverage and gap tracking lives in [`ATTACKS.md`](ATTACKS.md). That document is the source of truth for:
+
+- which attack vectors have been tested live and which have not
+- which defense layer each vector hits
+- known unfinished gaps and the planned fix order
+- offline regression results when a new pattern is added to the bytecode scanner
+
+`ATTACKS.md` is updated in lockstep with every defense change so an operator can see at a glance which attack classes are covered today and which are explicitly out of scope (e.g., flash-loan price manipulation is documented as a "won't fix" entry because it is economically infeasible at sniper-target liquidity sizes).
 
 ## Red-team testing
 
