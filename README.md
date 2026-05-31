@@ -581,9 +581,12 @@ All seven STAGE 4 vectors caught at Layer A (Check 3.5) with combinedRisk betwee
 **STAGE 5 (Tests 25-28, 2026-05-31)** attacked 4 new vectors from `ATTACKS.md` Section C using custom token + hook contracts:
 
 - Test 25 (v24): token-side time-bomb hookless V4 — **PASS** after Day 10 Fix 4 added (`gasTrapProbe` future-block clean-revert handling; V4 Quoter doesn't trigger `transfer`, so Fix 2's hookless-probe expansion was insufficient on its own)
-- Test 26 (v25): token blacklist post-buy — **PARTIAL** (Day 10 Fix 5 added to catch post-submit `receipt.status=0` reverts; not yet re-tested live)
-- Test 27 (v26): fee-on-transfer escalation — test contract design flaw, vector remains documented gap for Day 11
+- Test 26 (v25): token blacklist post-buy — initially partial; **PASS** after Day 10 Fix 5 v2 (`tx.wait()` try/catch for ethers v6 CALL_EXCEPTION) — verified live in Test 29
+- Test 27 (v26): fee-on-transfer escalation — Day 11 Fix 7 (post-buy receive verification) shipped; closes the vector regardless of token contract design
 - Test 28 (v27): `afterSwap` return-delta drain — **PASS** at Layer A `isCritical` (combinedRisk 110, address-bit signature alone)
+- Test 30 (Day 11 Fix 6 live): Layer F discovered to be broken since Day 8 — `getLiquidity(bytes32)` is not on V4 PoolManager. Switched to V4 StateView (`uniswapV4StateView` per-network config). Initial probe captures correctly, LP-drop fires emergency `LP_DROP` sell within 26 s of the rug.
+
+**Day 12** adds operator-opt-in MEV-protected RPC for tx submission. Per-network `mevProtectedRpcUrls` (empty default = previous public-mempool behaviour). When set, the executor's `wallet.sendTransaction` nonce-lock patch routes signed transactions through the MEV provider (`broadcastTransaction`) instead of the public RPC, falling back to public if the MEV broadcast errors. Closes vector #18 (sandwich / MEV).
 
 Three defense additions came out of red-teaming and now ship in the pipeline:
 
