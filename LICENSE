@@ -1,0 +1,127 @@
+GEMBA EOOD PROPRIETARY SOFTWARE LICENSE
+
+Copyright (c) 2026 Gemba EOOD. All rights reserved.
+
+This software and its associated documentation files (the "Software"), including
+without limitation the GEMBA Sniper Bot source code, configurations, deployment
+scripts, dashboard, database schema, and all derivative components, are the
+exclusive property of Gemba EOOD, a limited liability company registered in the
+Republic of Bulgaria.
+
+
+1. GRANT OF LICENSE
+
+No license, express or implied, is granted by this document. The Software is
+made available solely for the internal operation of Gemba EOOD and for the
+benefit of authorized subscribers of the GEMBA Sniper Bot SaaS service, subject
+to the separate Terms of Service governing that subscription.
+
+Authorized subscribers receive only a limited, non-transferable right to access
+and use the hosted instance of the Software during the term of an active paid
+subscription. No source-level access, redistribution rights, derivative-work
+rights, or sublicensing rights are conferred.
+
+
+2. RESTRICTIONS
+
+Without the prior written consent of Gemba EOOD, no person or entity may:
+
+(a) copy, reproduce, mirror, fork, distribute, sell, lease, sublicense, host,
+    or otherwise make the Software (or any portion thereof) available to any
+    third party;
+
+(b) decompile, disassemble, reverse-engineer, or otherwise attempt to derive
+    the source code, algorithms, defense pipelines, detection logic, or
+    proprietary techniques embodied in the Software, except to the extent that
+    applicable law expressly permits such activity notwithstanding this
+    restriction;
+
+(c) modify, adapt, translate, or create derivative works based on the Software,
+    including the documentation contained in this repository;
+
+(d) remove, alter, or obscure any proprietary notice, copyright notice,
+    trademark, or attribution included in the Software or its documentation;
+
+(e) use the Software, or any information derived from it, to develop, train,
+    benchmark, or evaluate any product or service that competes with the GEMBA
+    Sniper Bot;
+
+(f) use the Software for any unlawful purpose, including but not limited to
+    the deployment, distribution, or facilitation of honeypot contracts, rug-
+    pull schemes, market manipulation, or other forms of fraud targeting third
+    parties.
+
+
+3. SOURCE CODE CONFIDENTIALITY
+
+The source code of the Software is not published. Only this README, this
+LICENSE file, and any documentation explicitly designated for public release
+by Gemba EOOD are made publicly available. The publication of documentation
+does not constitute publication of, or any license to, the underlying source
+code.
+
+Any individual or entity that comes into possession of the source code, in
+whole or in part, by any means other than an express written grant from Gemba
+EOOD must promptly notify Gemba EOOD and destroy all copies in their
+possession or control.
+
+
+4. TRADEMARKS
+
+"GEMBA", "Gemba EOOD", "GEMBA Sniper Bot", "GembaPay", and "gembabots.com"
+are trademarks of Gemba EOOD. This license does not grant any right to use
+those trademarks except as required for accurate factual reference to the
+Software and its origin.
+
+
+5. NO WARRANTY
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE, NONINFRINGEMENT, OR THE ACCURACY OR
+COMPLETENESS OF ANY INFORMATION CONTAINED IN OR PRODUCED BY THE SOFTWARE.
+
+TRADING DIGITAL ASSETS CARRIES SUBSTANTIAL RISK, INCLUDING THE TOTAL LOSS OF
+DEPOSITED FUNDS. THE DEFENSE PIPELINES, HONEYPOT DETECTORS, AND ANY OTHER
+RISK-MITIGATION FEATURES OF THE SOFTWARE ARE BEST-EFFORT AND CANNOT GUARANTEE
+PROTECTION AGAINST ALL ATTACK VECTORS, MARKET CONDITIONS, OR COUNTERPARTY
+FAILURES. USERS BEAR FULL RESPONSIBILITY FOR THEIR OWN FUNDS AND CONFIGURATION.
+
+
+6. LIMITATION OF LIABILITY
+
+TO THE MAXIMUM EXTENT PERMITTED BY APPLICABLE LAW, IN NO EVENT SHALL GEMBA
+EOOD, ITS DIRECTORS, EMPLOYEES, AGENTS, OR LICENSORS BE LIABLE FOR ANY
+INDIRECT, INCIDENTAL, SPECIAL, CONSEQUENTIAL, OR PUNITIVE DAMAGES, INCLUDING
+WITHOUT LIMITATION LOSS OF PROFITS, LOSS OF DIGITAL ASSETS, BUSINESS
+INTERRUPTION, OR LOSS OF DATA, ARISING OUT OF OR IN CONNECTION WITH THE USE
+OF, OR INABILITY TO USE, THE SOFTWARE, EVEN IF GEMBA EOOD HAS BEEN ADVISED OF
+THE POSSIBILITY OF SUCH DAMAGES.
+
+
+7. TERMINATION
+
+Any breach of this License terminates all rights granted to the breaching
+party automatically and without notice. Upon termination, the breaching party
+must immediately cease all use of the Software and destroy any copies in
+their possession.
+
+
+8. GOVERNING LAW AND JURISDICTION
+
+This License is governed by the laws of the Republic of Bulgaria. Any dispute
+arising out of or in connection with this License shall be resolved by the
+competent courts of Sofia, Bulgaria.
+
+
+9. ENTIRE AGREEMENT
+
+This License constitutes the entire agreement between Gemba EOOD and any
+party who reads or accesses this repository concerning the publicly released
+documentation. The use of the hosted GEMBA Sniper Bot service is governed
+separately by the Terms of Service published at https://sniper.gembabots.com.
+
+
+Gemba EOOD
+Sofia, Bulgaria
+https://gembabots.com
