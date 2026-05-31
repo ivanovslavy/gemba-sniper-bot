@@ -565,7 +565,14 @@ Per-vector coverage and gap tracking lives in [`ATTACKS.md`](ATTACKS.md). That d
 
 `~/projects/test-hook-sepolia/` contains a Foundry workspace with controlled honeypot hook variants (`DynamicFeeHook.sol.v7.back` through `v16.back`), legitimate hook patterns (`CleanFeeHook.sol`, `LaunchBlockHook.sol`, `RewardTrackerHook.sol`), and the deploy / liquidity / pump / withdraw scripts used to deploy them to Sepolia. The full attack catalog and per-test results live in [`RED_TEAM.md`](RED_TEAM.md).
 
-The original RED_TEAM playbook lists ten canonical attack vectors against the delayed-tax probe and micro-test. As of 2026-05-31 every one of them is covered, either directly (vectors 1, 4 — actively red-team-tested live) or aggregated (vectors 2, 3, 5, 6, 7, 8, 9, 10 — covered by the v15 mega-hook smoke test plus v16 solo grace test).
+The original RED_TEAM playbook lists ten canonical attack vectors against the delayed-tax probe and micro-test. **As of 2026-05-31, all ten have been validated live**:
+
+- Vector 1 (Quoter sender bypass): Test 1 (v9 canonical) + Test 10 (v13/v14 obfuscated)
+- Vector 4 (Swap-count gating): Tests 2-8 (v10/v11/v12 variants)
+- Vector 5 (Long GRACE): Test 17 (v16)
+- Vectors 2, 3, 6, 7, 8, 9, 10: Tests 18-24 (v17-v23 solo, 2026-05-31 STAGE 4)
+
+All seven STAGE 4 vectors caught at Layer A (Check 3.5) with combinedRisk between 115 and 200 — well above the 100 softSkip threshold. The Day 10 `EVM_GLOBAL_BEFORESWAP_ONLY` pattern was the single most impactful change: pre-Day-10 vectors #2 (gasleft), #3 (coinbase), and #6 (tx.origin) scored 80-95 alone (under threshold = bypass); post-Day-10 they score 130-135 (caught).
 
 Three defense additions came out of red-teaming and now ship in the pipeline:
 

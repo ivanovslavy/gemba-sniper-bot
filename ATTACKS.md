@@ -24,15 +24,15 @@ work.
 | # | Vector | Tested | Defense layers | Gap |
 |---|---|---|---|---|
 | 1 | Quoter sender bypass | Yes — Test 1 (v9 canonical), Test 10 (v13/v14 obfuscated) | Layer A KNOWN_ADDRESS_EMBEDDED (+70), Layer B walletSimProbe (eth_simulateV1 caller spoof) | None |
-| 2 | `gasleft()` probe asymmetry | No solo test; appears in v15 mega-hook (Test 16) | Layer A GAS (+35). Solo combinedRisk ≈ 85 — UNDER 100 threshold | **YES** — solo deployment bypasses Layer A. Day 10 Fix 1 (EVM_GLOBAL_BEFORESWAP_ONLY +50) closes this once landed |
-| 3 | `block.coinbase == address(0)` | No solo test; in v15 | Layer A COINBASE (+35). Solo ≈ 85 — UNDER | **YES** — same fix path as #2 |
+| 2 | `gasleft()` probe asymmetry | **Yes — Test 20 (v19, 2026-05-31)** | Layer A GAS (+35) + Day 10 Fix 1 EVM_GLOBAL_BEFORESWAP_ONLY (+50) → combinedRisk **135** → softSkip ✅ verified live | Closed by Day 10 Fix 1 |
+| 3 | `block.coinbase == address(0)` | **Yes — Test 21 (v20, 2026-05-31)** | Layer A COINBASE (+35) + Day 10 Fix 1 → combinedRisk **135** → softSkip ✅ verified live | Closed by Day 10 Fix 1 |
 | 4 | Swap-count gating | Yes — Tests 2-8 (v10, v11, v12 variants) | Layer A SSTORE_BEFORESWAP_ONLY (+60), Layer C post-microsell re-probe | None |
 | 5 | Long GRACE window | Yes — Test 17 (v16, GRACE=100) | Day 9 Fix A multi-horizon probe `[50, 300, 1500]`; Day 9 Fix C GRACE_PATTERN (+40); Day 9 Fix B sell-time guard | None for grace ≤ 1500 blocks |
-| 6 | `tx.origin == address(0)` | No solo test; in v15 | Layer A ORIGIN (+30). Solo ≈ 80 — UNDER | **YES** — same fix path as #2 |
-| 7 | Manual `activate()` flag flip | No solo test; in v15 | Day 9 Fix B sell-time guard (30% threshold) — catches **post-buy** | **PARTIAL** — bot still opens the position before the flag flips; loss limited to whatever the sell trap returns vs buy cost. Document, don't fix (would require a sell-time probe with mock-state). |
-| 8 | Conditional revert at specific future block | No solo test; in v15 | delayedTaxProbe treats future-block revert as `detected: true, dropPct: 100` (current code line 253) — should already catch | Verify with v23 test |
-| 9 | `basefee == 0` / `blockhash == 0` | No solo test; in v15 | Layer A BASEFEE (+30) + BLOCKHASH (+30). Solo combined ≈ 110-130 — softSkip | Verify with v17 test (border-case scoring) |
-| 10 | Wallet-tracker (per-wallet counter) | No solo test; in v15 | Layer A SSTORE_BEFORESWAP_ONLY (+60) when hook only has beforeSwap (solo ≈ 120 — softSkip) | Verify with v18 test. Hook with afterInitialize + per-wallet counter would bypass SSTORE_BEFORESWAP_ONLY — that combo not yet thought through. |
+| 6 | `tx.origin == address(0)` | **Yes — Test 22 (v21, 2026-05-31)** | Layer A ORIGIN (+30) + Day 10 Fix 1 → combinedRisk **130** → softSkip ✅ verified live | Closed by Day 10 Fix 1 |
+| 7 | Manual `activate()` flag flip | **Yes — Test 23 (v22, 2026-05-31)** | Day 9 Fix B sell-time guard intended; in practice Layer A's SSTORE_BEFORESWAP_ONLY caught it at combinedRisk **120** because v22's deployer-flag SSTORE trips the heuristic. Fix B sell-time path remains code-reviewed-correct but not exercised on this vector. | Closed by Layer A coincidence; Fix B remains backstop for hypothetical proxy-pattern variants |
+| 8 | Conditional revert at specific future block | **Yes — Test 24 (v23, 2026-05-31)** | Layer A GRACE_PATTERN (Day 9 Fix C) caught it at combinedRisk **115** because v23's SLOAD+NUMBER compare matches the launchBlock+grace fingerprint. delayedTaxProbe future-revert handling (code line 253) remains correct backstop. | Closed by Layer A coincidence |
+| 9 | `basefee == 0` / `blockhash == 0` | **Yes — Test 18 (v17, 2026-05-31)** | Layer A BASEFEE + BLOCKHASH + NUMBER + Day 10 Fix 1 → combinedRisk **175** → softSkip ✅ verified live | None |
+| 10 | Wallet-tracker (per-wallet counter) | **Yes — Test 19 (v18, 2026-05-31)** | Layer A SSTORE_PRESENT + SSTORE_BEFORESWAP_ONLY + ORIGIN + Day 10 Fix 1 → combinedRisk **200** → softSkip ✅ verified live | None |
 
 ---
 
@@ -136,15 +136,15 @@ LaunchBlock / RewardTracker / v16: no false positives (combined risks
 
 ## Section F — Test plan (after defenses land)
 
-| Test | Hook source | Purpose | Cost (sepolia ETH) |
-|---|---|---|---|
-| v17 | solo vector #9 (basefee + blockhash) | Verify Layer A scores 110+ → softSkip | ~0.04 |
-| v18 | solo vector #10 (wallet-tracker) | Verify Layer A SSTORE_BEFORESWAP_ONLY softSkip | ~0.04 |
-| v19 | solo vector #2 (gasleft) | Verify Day 10 Fix 1 EVM_GLOBAL_BEFORESWAP_ONLY catches | ~0.04 |
-| v20 | solo vector #3 (coinbase) | Same | ~0.04 |
-| v21 | solo vector #6 (tx.origin) | Same | ~0.04 |
-| v22 | solo vector #7 (manual activate) | Confirm Day 9 Fix B sell-time guard catches at 30% threshold | ~0.04 |
-| v23 | solo vector #8 (conditional revert) | Verify delayedTaxProbe handles future-revert correctly | ~0.04 |
+| Test | Hook source | Purpose | Status | Cost (sepolia ETH) |
+|---|---|---|---|---|
+| v17 (Test 18) | solo vector #9 (basefee + blockhash) | Verify Layer A scores 110+ → softSkip | **DONE — combinedRisk 175 ✅** | ~0.04 |
+| v18 (Test 19) | solo vector #10 (wallet-tracker) | Verify Layer A SSTORE_BEFORESWAP_ONLY softSkip | **DONE — combinedRisk 200 ✅** | ~0.04 |
+| v19 (Test 20) | solo vector #2 (gasleft) | Verify Day 10 Fix 1 EVM_GLOBAL_BEFORESWAP_ONLY catches | **DONE — combinedRisk 135 ✅ smoking gun** | ~0.04 |
+| v20 (Test 21) | solo vector #3 (coinbase) | Same | **DONE — combinedRisk 135 ✅** | ~0.04 |
+| v21 (Test 22) | solo vector #6 (tx.origin) | Same | **DONE — combinedRisk 130 ✅** | ~0.04 |
+| v22 (Test 23) | solo vector #7 (manual activate) | Confirm Day 9 Fix B sell-time guard catches at 30% threshold | **DONE — combinedRisk 120 via SSTORE_BEFORESWAP_ONLY coincidence ✅** | ~0.04 |
+| v23 (Test 24) | solo vector #8 (conditional revert) | Verify delayedTaxProbe handles future-revert correctly | **DONE — combinedRisk 115 via GRACE_PATTERN coincidence ✅** | ~0.04 |
 | v24 | token-side time-bomb (no hook) | Verify Day 10 Fix 2 catches | ~0.04 |
 | v25 | Permit2 revocation race | Verify Day 10 Fix 3 catches | ~0.05 (needs deployer permit signing flow) |
 | v26 | fee-on-transfer escalation | Document partial coverage; design Day 11 fix from result | ~0.04 |
