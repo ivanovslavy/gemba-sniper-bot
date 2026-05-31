@@ -247,7 +247,7 @@ The dashboard has a flat horizontal navbar with the following tabs (in order):
 | Overview | Three BotCards (Sepolia / Ethereum / Base). Each shows running status, last heartbeat, open positions, last 10 trades, Start/Stop buttons. | `/bot/status`, `/bot/positions`, `/bot/start`, `/bot/stop`, `/trades?limit=10`, `/settings` |
 | Live (Activity) | Real-time event feed: pipeline reports, contract analysis, honeypot analysis, transfer sim, micro-test results, buy/sell/position events. Filters: network and event type. | `/activity/recent`, `/activity/stream` (SSE) |
 | Analytics | Per-network PnL chart (Recharts), summary cards (total PnL, ROI%, win rate), paginated trade list (20/page). Date range selectable; default 7 days. | `/trades/analytics?network=&from=&to=` |
-| Analyzer | One-off token analysis form. Returns verdict (SAFE / SUSPICIOUS / HONEYPOT) with full audit trail. Lists the 50 most recently analyzed tokens. | `/token/analyze`, `/token/analyzed`, `/trusted` |
+| Analyzer / Manual Trade | Two-mode form for running the **full** detection pipeline against any token the user pastes. **Analyze** (dry-run) runs every stage but never opens a position. **Trade now** runs the same pipeline and, if every check passes, executes the real buy through the user's running bot. Lists the user's recent submissions with their final verdict. Replaces the legacy `/token/analyze` route which ran only 2 of 9 detection modules. | `/bot/manual` (POST), `/bot/manual/:id` (GET), `/bot/manual` (GET), legacy `/token/analyze` and `/token/analyzed` still served for back-compat |
 | Watchlist | Per-user watched tokens. When `watch_only` is on the bot only alerts on these; when off the bot also buys (still subject to the full pipeline). | `/watchlist`, `/watchlist` (POST), `/watchlist/:addr?network=` (DELETE) |
 | Settings | Trading-side configuration (see Settings tab fields below) and a button to send a Telegram test message. | `/settings`, `/notifications/test` |
 | Risk | Risk-side configuration: score thresholds, hard-scam toggles, micro-test overrides, "Reset to defaults" preview/confirm. | `/settings`, `/settings/reset-risk` |
@@ -346,6 +346,9 @@ All routes are mounted under `/` on the API process (port 3010 internally, rever
 | GET | `/activity/recent` | `?limit&network&since` | Recent in-memory pipeline events |
 | GET | `/activity/stream` | `?token=` | Server-Sent Events live stream |
 | POST | `/activity/internal` | event payload + `x-internal-secret` | Engine pushes events to the live feed (internal use only) |
+| POST | `/bot/manual` | `{ tokenAddress, network, poolAddress?, mode }` where `mode ∈ {analyze, trade}` | Queues the user's token for a **full-pipeline** run. Inserts a row into `manual_opportunities` (status `pending`); the engine's manual-opportunity watcher picks it up within ~3 s, resolves the pool (V3 factory probe across `{100, 500, 3000, 10000}` × supportedQuoteTokens if `poolAddress` is omitted), and dispatches it to the user's running Sniper. `analyze` = dry-run, never buys; `trade` = full pipeline + real buy. Soft-deduped 30 s per `(user, network, token)` |
+| GET | `/bot/manual/:id` | — | Polls the submission row: `status`, the bundled pipeline `result` (every stage, verdict, scores), `rejectionReason` |
+| GET | `/bot/manual` | `?limit` (default 25, max 100) | User's recent submissions with a verdict-summary projection (final verdict, contract score, honeypot score) |
 | GET | `/subscriptions/status` | — | Per-network subscription state |
 | POST | `/subscriptions/checkout` | `{ plan, network }` | Creates a pending subscription + GembaPay payment request |
 | POST | `/subscriptions/activate-free-trial` | — | One-shot trial activation |
@@ -355,7 +358,7 @@ All routes are mounted under `/` on the API process (port 3010 internally, rever
 
 ## Database schema
 
-PostgreSQL 12+. Schema in `src/db/schema.sql`; migrations in `src/db/migrations/00X_*.sql` (currently 1, 3-22 — migration `002` was renumbered).
+PostgreSQL 12+. Schema in `src/db/schema.sql`; migrations in `src/db/migrations/00X_*.sql` (currently 1, 3-23 — migration `002` was renumbered).
 
 ### Tables
 
@@ -373,6 +376,7 @@ PostgreSQL 12+. Schema in `src/db/schema.sql`; migrations in `src/db/migrations/
 | `subscriptions` | `id` + UNIQUE `(gembapay_order_id)` | Per-user, per-network plan with `expires_at`. Six reminder-sent flags for the cron job |
 | `orphan_balances` | `id` + UNIQUE `(user_id, network, token_address, buy_tx_hash)` | Stuck tokens after failed micro-test sells |
 | `unstuck_attempts` | `id` | Auto-unstuck sweeper audit trail |
+| `manual_opportunities` | `id` (uuid) | Dashboard-submitted full-pipeline runs (Analyzer / Manual Trade tabs). `mode ∈ {analyze, trade}`, `status ∈ {pending, picked_up, done, rejected, error}`. The engine's `manualOpportunityWatcher` polls pending rows, resolves missing pool address via V3 factory lookup, dispatches to the user's running Sniper, and persists the bundled report into `result` JSONB. See migration 023 |
 
 ### Trades — V4 metadata (migration 016) and Layer F baseline (migration 022)
 
@@ -573,6 +577,13 @@ The original RED_TEAM playbook lists ten canonical attack vectors against the de
 - Vectors 2, 3, 6, 7, 8, 9, 10: Tests 18-24 (v17-v23 solo, 2026-05-31 STAGE 4)
 
 All seven STAGE 4 vectors caught at Layer A (Check 3.5) with combinedRisk between 115 and 200 — well above the 100 softSkip threshold. The Day 10 `EVM_GLOBAL_BEFORESWAP_ONLY` pattern was the single most impactful change: pre-Day-10 vectors #2 (gasleft), #3 (coinbase), and #6 (tx.origin) scored 80-95 alone (under threshold = bypass); post-Day-10 they score 130-135 (caught).
+
+**STAGE 5 (Tests 25-28, 2026-05-31)** attacked 4 new vectors from `ATTACKS.md` Section C using custom token + hook contracts:
+
+- Test 25 (v24): token-side time-bomb hookless V4 — **PASS** after Day 10 Fix 4 added (`gasTrapProbe` future-block clean-revert handling; V4 Quoter doesn't trigger `transfer`, so Fix 2's hookless-probe expansion was insufficient on its own)
+- Test 26 (v25): token blacklist post-buy — **PARTIAL** (Day 10 Fix 5 added to catch post-submit `receipt.status=0` reverts; not yet re-tested live)
+- Test 27 (v26): fee-on-transfer escalation — test contract design flaw, vector remains documented gap for Day 11
+- Test 28 (v27): `afterSwap` return-delta drain — **PASS** at Layer A `isCritical` (combinedRisk 110, address-bit signature alone)
 
 Three defense additions came out of red-teaming and now ship in the pipeline:
 

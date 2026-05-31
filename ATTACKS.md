@@ -48,14 +48,14 @@ work.
 
 | # | Vector | Tested | Defense layers | Gap |
 |---|---|---|---|---|
-| 12 | Token-side time-bomb (no hook; ERC20 `transfer` reverts or escalates fee after stored expiry) | No | Day 10 Fix 2 (proposed) — extend `delayedTaxProbe` to hookless V4 pools so future-block Quoter call exposes token-side time-gating | **YES** until Fix 2 lands. After Fix 2, V3 hookless time-bombs still uncovered (no V3 future-block probe) |
+| 12 | Token-side time-bomb (no hook; ERC20 `transfer` reverts or escalates fee after stored expiry) | **Yes — Test 25 (v24, 2026-05-31)** | Day 10 Fix 2 (probe hookless pools) insufficient — V4 Quoter doesn't call `transfer` in simulation. **Day 10 Fix 4 added**: gasTrapProbe treats future-block estimateGas clean reverts as time-bomb. `provider.estimateGas` of a real swap DOES call transfer. Verified live. | Closed by Day 10 Fix 4 (V4 only; V3 still uncovered) |
 | 13 | Token rebase post-buy (deployer's `transferFrom` dilutes bot's holdings after buy) | No | None — `analyzed_tokens` cache snapshot is static; no runtime check on totalSupply drift | **YES (full gap)**. Mitigation: manual blacklist of known rebase token contracts. Reliable detection is impractical (every rebase token has its own pattern) |
 | 14 | Fee-on-transfer escalation by amount (low buy fee, exponential sell fee that scales with amountIn) | No | Layer E2 catches if the escalation hits the gas limit. Pure fee-only escalation (gas stays normal) bypasses | **PARTIAL** — Layer E2 misses pure-fee variants. Day 11 candidate: Quoter quote at micro-test scale vs at real-size scale; ratio drop > slippage threshold = trap |
 | 15 | Permit2 trap (deployer signs `Permit2.permit` revoking bot's allowance mid-trade) | No | Day 10 Fix 3 (proposed) — re-fetch Permit2 allowance immediately before each real sell (max 60 s cache) | **YES** until Fix 3 lands |
 | 16 | Liquidity-switching (deployer adds malicious 2nd pool with hook; bot routes sells through it) | No | `_sellV4` reconstructs PoolKey from `position.{poolId,hooks,tickSpacing,fee}` — pinned to the original pool. Cannot be switched. | None expected — verify in audit |
-| 17 | `afterSwap` return-delta drain (hook returns BalanceDelta that steals bot's output) | No | `hookAnalyzer` flags `AFTER_SWAP_RETURNS_DELTA` permission bit as critical (`isCritical = true`, softSkip threshold drops to 80) | Probably covered; verify with a test hook |
+| 17 | `afterSwap` return-delta drain (hook returns BalanceDelta that steals bot's output) | **Yes — Test 28 (v27, 2026-05-31)** | Layer A `isCritical: true` at combinedRisk 110 → softSkip ✅ verified live. Address-bit signature alone sufficient. | Closed |
 | 18 | Sandwich / MEV (mempool front-run on bot's micro-test or real buy) | No | None — bot uses public RPC submission, no flashbots or private mempool | **YES (full gap)**. Day 12 candidate: per-network MEV-protected RPC option (mevblocker / merkle / Cow) |
-| 19 | Token blacklist post-buy (`transfer` adds bot wallet to internal blacklist on first receive) | No | Micro-test buy succeeds; first real sell from THIS wallet would already be in blacklist → reverts. Layer E2 catches the gas-trap-style revert pattern but not all blacklist patterns (some just `revert()` cleanly which is a "definitive revert" code path → bot aborts cleanly but holds the bag) | **PARTIAL**. Day 11 candidate: dual-wallet micro-test (buy from wallet A, sell from wallet A in micro-test, real buy from wallet A but with new burner check). Operationally expensive. |
+| 19 | Token blacklist post-buy (`transfer` adds bot wallet to internal blacklist on first receive) | **Yes — Test 26 (v25, 2026-05-31)** | Day 10 Fix 3 (estimateGas-time definitive revert) didn't catch — estimator returned success (85k gas) but tx reverted at execution. **Day 10 Fix 5 added**: post-submit receipt.status=0 also triggers HONEYPOT persist + `SELL_DEFINITIVE_REVERT_MARKER` throw → auto_unstuck writes off on first attempt. Code added 2026-05-31, not yet re-tested live. | Code-added Day 10 Fix 5; live re-test pending |
 | 20 | Reentrancy via `beforeSwap` callback | No | V4 PoolManager has unlock/lock pattern; nested swaps inside beforeSwap revert | Untested but architecturally blocked |
 | 21 | Pool-state oracle manipulation (hook reads sqrtPriceX96 to compute fee, attacker flash-loans to skew before bot's swap) | No | None | **YES (full gap)**. Rare in practice for sniper-target pools (too low liquidity to be worth a flash loan). Document. |
 | 22 | Multi-hook composition (hook A calls hook B that the scanner did not visit) | No | hookAnalyzer fetches getCode of `opportunity.hooks` only; doesn't trace external calls | **YES (deep gap)**. Day 13 candidate: add an `extcodesize`/CALL static-scan to hookBytecodeScanner — flag any hook that performs external CALLs |
@@ -94,9 +94,17 @@ What every layer / check protects against today (as of 2026-05-31, post Day 9):
 
 ### Day 10 — Closing canonical solo gaps + token time-bomb + token blacklist post-buy
 
-**Status: IMPLEMENTED 2026-05-31.** Offline regression on CleanFee /
-LaunchBlock / RewardTracker / v16: no false positives (combined risks
-60 / 85 / 70 / 125 respectively — only v16 grace solo trips softSkip).
+**Status: IMPLEMENTED 2026-05-31** (5 fixes total: Fix 1 + Fix 2 + Fix 3 initially planned; Fix 4 + Fix 5 added during STAGE 5 testing). Offline regression on CleanFee / LaunchBlock / RewardTracker / v16: no false positives (combined risks 60 / 85 / 70 / 125 respectively — only v16 grace solo trips softSkip).
+
+Two additional fixes shipped during STAGE 5 (Tests 25-28) red-team
+testing in response to gaps surfaced by v24 + v25:
+
+- **Fix 4** — `gasTrapProbe.js`: future-block clean-revert = time-bomb detection. Closes vector #12 (V4 path) where v24 exposed that Day 10 Fix 2 alone was insufficient because Quoter doesn't trigger `transfer`.
+- **Fix 5** — `executor.js _sellV4`: post-submit `receipt.status=0` triggers HONEYPOT persist + `SELL_DEFINITIVE_REVERT_MARKER` throw. Closes vector #19 tail case where v25 exposed Day 10 Fix 3's estimateGas-only gating missed actual tx-time reverts.
+
+Plus a third change required by Fix 2: **sniper.js gating fix** removed
+the hookless V4 short-circuit at the `!hasHooks` branch so hookless
+pools actually reach the delayedTaxProbe call.
 
 | Fix | Location | What it does | Closes vectors |
 |---|---|---|---|
