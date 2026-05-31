@@ -103,7 +103,7 @@ Check 8    Real-size vs micro-test pro-rata                  (sniper._guardRealB
 
 **Check 3.4 — Hook blacklist precheck.** Looks up the hook address AND its bytecode hash in `hook_blacklist`. A hit aborts the pipeline immediately — no probes, no micro-test, no gas spent. Catches re-deploys of known traps even when the attacker uses a fresh CREATE2 salt to mint a new hook address (because the bytecode hash is stable).
 
-**Check 3.5 — Layer A bytecode scanner (Day 2 + Day 5 + Day 9).** `src/detection/hookBytecodeScanner.js` walks the hook runtime bytecode, skipping PUSH data bytes, and scores against the patterns below. The score is added to a base "flag risk" (derived from which permission bits the hook has) and an "unknown deployment" penalty. Soft-skip if combined risk crosses thresholds: 80 for hooks with critical permissions (ReturnDelta) or 100 otherwise.
+**Check 3.5 — Layer A bytecode scanner (Day 2 + Day 5 + Day 9 + Day 10 + Day 13).** `src/detection/hookBytecodeScanner.js` walks the hook runtime bytecode, skipping PUSH data bytes, and scores against the patterns below. The score is added to a base "flag risk" (derived from which permission bits the hook has) and an "unknown deployment" penalty. Soft-skip if combined risk crosses thresholds: 80 for hooks with critical permissions (ReturnDelta) or 100 otherwise.
 
   | Pattern | Score | Catches |
   |---|---|---|
@@ -120,6 +120,8 @@ Check 8    Real-size vs micro-test pro-rata                  (sniper._guardRealB
   | `TIMESTAMP` (Day 9) | +15 | `block.timestamp` time-gating signal |
   | `GRACE_PATTERN` (Day 9) | +40 | SLOAD followed by NUMBER/TIMESTAMP within 16 ops — v7/v16 launchBlock + grace fingerprint |
   | `EVM_GLOBAL_BEFORESWAP_ONLY` (Day 10) | +50 | Any EVM-global opcode (GAS/COINBASE/ORIGIN/BASEFEE/BLOCKHASH/GASLIMIT) combined with only-beforeSwap permission — closes solo-EVM-global bypasses (vectors #2/#3/#6/#9) |
+  | `EXTERNAL_CALL_BEFORESWAP_ONLY` (Day 13) | +60 | Any external CALL / STATICCALL / CALLCODE opcode combined with only-beforeSwap permission — closes multi-hook composition trap (hook A's beforeSwap calls hook B's trap logic) |
+  | `DELEGATECALL_PRESENT` (Day 13) | +60 | Any DELEGATECALL opcode in the hook's runtime bytecode, regardless of permission shape — closes proxy-hook upgrade attack (swappable implementation flips beforeSwap behaviour post-buy) |
 
   Detection writes the hook into `hook_blacklist` with reason `bytecode_heuristic` so subsequent encounters short-circuit at Check 3.4.
 
@@ -587,6 +589,8 @@ All seven STAGE 4 vectors caught at Layer A (Check 3.5) with combinedRisk betwee
 - Test 30 (Day 11 Fix 6 live): Layer F discovered to be broken since Day 8 — `getLiquidity(bytes32)` is not on V4 PoolManager. Switched to V4 StateView (`uniswapV4StateView` per-network config). Initial probe captures correctly, LP-drop fires emergency `LP_DROP` sell within 26 s of the rug.
 
 **Day 12** adds operator-opt-in MEV-protected RPC for tx submission. Per-network `mevProtectedRpcUrls` (empty default = previous public-mempool behaviour). When set, the executor's `wallet.sendTransaction` nonce-lock patch routes signed transactions through the MEV provider (`broadcastTransaction`) instead of the public RPC, falling back to public if the MEV broadcast errors. Closes vector #18 (sandwich / MEV).
+
+**Day 13** extends Layer A with two new bytecode-scanner heuristics targeting the last two documented gaps in `ATTACKS.md`. `EXTERNAL_CALL_BEFORESWAP_ONLY` (+60) fires when any external CALL / STATICCALL / CALLCODE opcode is present and the hook's only permission bit is `beforeSwap`. Closes vector #22 (multi-hook composition): hook A's beforeSwap externally calls hook B's trap logic — the scanner only inspects hook A, so the trap in hook B is invisible, but hook A reaching out at all is the fingerprint. `DELEGATECALL_PRESENT` (+60) fires on any DELEGATECALL opcode in the runtime bytecode regardless of permission shape — V4 hook permissions are address-bit-bound and can't change post-deploy, but DELEGATECALL targets can, so a proxy hook's beforeSwap behaviour can be flipped from "free buy" to "99% sell tax" without changing the hook address. Legitimate V4 hooks essentially never use proxy patterns (permission-bit mining + factory pipeline conflict). Verified by 18/18 synthetic-bytecode regression checks at `test/day13_offline_scanner.js` (no live red-team yet — v28/v29 custom contracts deferred to a future session; code-only ship matches the pattern used for Day 5 and Day 10 Fix 1).
 
 Three defense additions came out of red-teaming and now ship in the pipeline:
 

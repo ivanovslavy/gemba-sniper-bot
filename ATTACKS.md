@@ -58,8 +58,8 @@ work.
 | 19 | Token blacklist post-buy (`transfer` adds bot wallet to internal blacklist on first receive) | **Yes — Test 26 (v25, 2026-05-31) + re-test (Day 11)** | Day 10 Fix 5 (rev 2) verified live. ethers v6 `tx.wait()` THROWS `CALL_EXCEPTION` on status=0 (not returns) — catch wraps `wait()`, classifies `err.receipt.status === 0` as definitive revert, persists HONEYPOT (`source: sell_tx_revert_at_execution`), throws `SELL_DEFINITIVE_REVERT`. Day 11 also added matching handler in `positionManager._sellFull` catch — marker recognition writes off the open position immediately so the 30 s tick doesn't keep retrying. | Closed |
 | 20 | Reentrancy via `beforeSwap` callback | No | V4 PoolManager has unlock/lock pattern; nested swaps inside beforeSwap revert | Untested but architecturally blocked |
 | 21 | Pool-state oracle manipulation (hook reads sqrtPriceX96 to compute fee, attacker flash-loans to skew before bot's swap) | No | None | **YES (full gap)**. Rare in practice for sniper-target pools (too low liquidity to be worth a flash loan). Document. |
-| 22 | Multi-hook composition (hook A calls hook B that the scanner did not visit) | No | hookAnalyzer fetches getCode of `opportunity.hooks` only; doesn't trace external calls | **YES (deep gap)**. Day 13 candidate: add an `extcodesize`/CALL static-scan to hookBytecodeScanner — flag any hook that performs external CALLs |
-| 23 | Hook upgrade (proxy hook whose implementation changes mid-position) | No | hook addresses in V4 are bound to permission bits in the address itself, so a proxy that changes implementation cannot change permissions — but CAN change behavior of beforeSwap/afterSwap | **YES (latent)**. Document; combined-risk should already be high because proxies show DELEGATECALL pattern; verify |
+| 22 | Multi-hook composition (hook A calls hook B that the scanner did not visit) | **Code-only — Day 13 offline regression (2026-05-31, 18/18 synthetic checks pass)** | **Day 13 Fix 9** — Layer A `EXTERNAL_CALL_BEFORESWAP_ONLY` (+60). Fires when any external-call opcode (CALL/STATICCALL/CALLCODE) is present AND hook permissions = ONLY beforeSwap. Same gating shape as SSTORE_BEFORESWAP_ONLY / EVM_GLOBAL_BEFORESWAP_ONLY: a beforeSwap-only hook has no legitimate reason to reach out (fee determination should be pure). Solo combined risk ≈ 20 (perm) + 60 (heuristic) + 20 (unknown) = **100** → softSkip. | Closed code-only by Day 13 Fix 9; live red-team test (v28 hook-calls-hook custom contract) not yet exercised |
+| 23 | Hook upgrade (proxy hook whose implementation changes mid-position) | **Code-only — Day 13 offline regression (2026-05-31, 18/18 synthetic checks pass)** | **Day 13 Fix 10** — Layer A `DELEGATECALL_PRESENT` (+60). Fires on any DELEGATECALL in the hook's runtime bytecode regardless of permission shape. V4 hook permissions are bound to address bits and can't change post-deploy, but DELEGATECALL targets CAN — so beforeSwap behaviour can flip from "free buy" to "99% sell tax" without changing the hook address. Legit V4 hooks have ~no reason to be proxies (mining permission bits on a proxy is impractical for the deployer's pipeline). Solo combined risk same as Fix 9 → softSkip. | Closed code-only by Day 13 Fix 10; live red-team test (v29 transparent-proxy hook) not yet exercised |
 
 ---
 
@@ -74,7 +74,7 @@ What every layer / check protects against today (as of 2026-05-31, post Day 9):
 | Check 2 V4 dynamic-fee | (UI safety) |
 | Check 3 Liquidity floor | (low-LP traps, partial #11) |
 | Check 3.4 Hook blacklist | All vectors after first sighting (compounding defense) |
-| Check 3.5 Layer A bytecode scanner | #1 (canonical), #4, #9, #10 (likely); #2, #3, #6 only when aggregated (caught in v15 Test 16) |
+| Check 3.5 Layer A bytecode scanner | #1 (canonical), #4, #9, #10 (likely); #2, #3, #6 (Day 10 Fix 1); #22 (Day 13 Fix 9 EXTERNAL_CALL_BEFORESWAP_ONLY); #23 (Day 13 Fix 10 DELEGATECALL_PRESENT) |
 | Check 3.6 delayedTaxProbe multi-horizon (Day 9 Fix A) | #5 (any GRACE ≤ 1500), #8 (future-block revert); #12 partial after Day 10 Fix 2 |
 | Check 3.7 Layer B walletSimProbe | #1 (obfuscated v13/v14 storage-slot variant); does NOT catch caller-blind traps |
 | Check 4 ContractAnalyzer (token bytecode) | proxy / hidden contract / dangerous admin selectors |
@@ -91,6 +91,45 @@ What every layer / check protects against today (as of 2026-05-31, post Day 9):
 ---
 
 ## Section E — Implementation roadmap
+
+### Day 13 — Multi-hook composition + hook upgrade (proxy) static-scan
+
+**Status: IMPLEMENTED 2026-05-31** (code-only, offline regression 18/18 pass; live red-team v28/v29 not yet exercised).
+
+Two new Layer A bytecode-scanner heuristics close the last two
+documented gaps in `hookBytecodeScanner.js`. Both follow the same
+gating shape as Day 5's `SSTORE_BEFORESWAP_ONLY` and Day 10 Fix 1's
+`EVM_GLOBAL_BEFORESWAP_ONLY` — a beforeSwap-only hook has no
+legitimate reason to mutate storage, read EVM globals, OR reach out
+to other contracts during fee determination.
+
+- **Fix 9** — `hookBytecodeScanner.js`: new pattern `EXTERNAL_CALL_BEFORESWAP_ONLY` (+60). Fires when CALL (`0xf1`), STATICCALL (`0xfa`), or CALLCODE (`0xf2`) is present AND only-beforeSwap permission bits are set. Closes vector #22 (multi-hook composition): hook A's beforeSwap externally calls hook B's trap logic, which the scanner can't see by walking hook A alone — but the fact that hook A calls out at all is the fingerprint.
+- **Fix 10** — `hookBytecodeScanner.js`: new pattern `DELEGATECALL_PRESENT` (+60). Fires on any DELEGATECALL (`0xf4`) opcode in the runtime bytecode, regardless of permission shape (stronger signal than Fix 9 because legitimate V4 hooks are essentially never proxies — permission bits are mined into the address, you can't ship a proxy that's been mined to specific permission bits unless you also control the implementation factory pipeline). Closes vector #23 (hook upgrade / proxy hook): deployer DELEGATECALLs into a separate implementation contract that they can swap post-buy to flip beforeSwap behaviour from "free buy" to "99% sell tax" without changing the hook address.
+
+Both heuristics score +60 each. Solo trigger combined-risk for a
+hostile beforeSwap-only proxy hook with unknown deployer: 20 (address-
+flag riskScore) + 60 (one heuristic) + 20 (unknown penalty) = **100**
+= exactly on the NON_CRITICAL softSkip threshold. Stacking both = 160
+→ comfortably over threshold.
+
+Offline regression (`test/day13_offline_scanner.js`): 18/18 synthetic
+checks pass. Confirms:
+- Both heuristics fire on the canonical positive cases.
+- Neither fires on multi-permission hooks (afterSwap present) — no
+  false positive on legitimate hooks that legitimately call out
+  during the afterSwap callback (e.g. fee oracles, accounting).
+- Neither fires on PUSH-embedded `0xf4` / `0xf1` bytes (operand data,
+  not opcodes) — the disassembler's PUSHn-skipping logic is correct
+  for the new opcodes.
+- Existing patterns (SSTORE_PRESENT, SSTORE_BEFORESWAP_ONLY,
+  EVM_GLOBAL_BEFORESWAP_ONLY, GRACE_PATTERN, etc.) are unchanged.
+
+**Live verification deferred** to a future session; v28 (multi-hook
+composition) and v29 (transparent-proxy hook) custom contracts have
+not yet been deployed to sepolia. Code-only ship is acceptable because
+both heuristics are pure-function bytecode scans — same shape as Day
+5 and Day 10 Fix 1, both of which were initially shipped code-only and
+later live-verified without changes.
 
 ### Day 11+12 — Post-buy receive verification + Layer F StateView fix + MEV-protected RPC
 
@@ -137,7 +176,6 @@ pools actually reach the delayedTaxProbe call.
 |---|---|---|
 | Quoter dual-scale check (micro vs real-size ratio) | #14 fee escalation | small — extends Check 8 |
 | MEV-protected RPC option | #18 sandwich / MEV | medium — per-network config + provider |
-| `extcodesize`/CALL static scan in hookBytecodeScanner | #22 multi-hook composition | medium — bytecode walker extension |
 | V3 hookless future-block probe | #12 V3 path | medium — V3 quoter has no BlockOverrides support on all RPCs |
 | Rebase token blacklist (manual curated list) | #13 | small — config-driven |
 | Pool-state oracle manipulation defense | #21 | hard — generally requires private-mempool execution |
@@ -169,6 +207,9 @@ pools actually reach the delayedTaxProbe call.
 | Live verification | Check 0.9 on real Clanker on Base | Confirm rejection in production traffic | $0 (passive) |
 | Live verification | Layer F controlled LP-pull | Trigger 70%+ LP removal on bot-held position; expect emergency sell | ~0.05 (deploy + LP + remove) |
 | Live verification | Layer E2 re-test on gas-trap | Re-deploy time-bomb-style token; expect single-attempt writeoff | ~0.05 |
+| v28 (Day 13) | Multi-hook composition (hook A → hook B) | Verify Day 13 Fix 9 EXTERNAL_CALL_BEFORESWAP_ONLY catches at combinedRisk ≥ 100 → softSkip | ~0.05 (deploy two hooks + token + pool) |
+| v29 (Day 13) | Transparent-proxy hook (deployer-swappable impl) | Verify Day 13 Fix 10 DELEGATECALL_PRESENT catches regardless of perm shape | ~0.05 (deploy proxy + impl + token + pool) |
+| Day 13 offline regression | `test/day13_offline_scanner.js` | Synthetic bytecode through `scanHookBytecode`; assert both Day 13 heuristics fire on positive cases, stay silent on multi-perm hooks and PUSH-embedded opcode bytes | **DONE — 18/18 checks pass ✅** | $0 |
 
 Estimated total: ~0.5 sepolia ETH + ~10-15 hours wall-clock.
 
